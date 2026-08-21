@@ -1,0 +1,22 @@
+[Unit]
+Description=volley — ежедневный опрос на волейбол в Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=volley
+WorkingDirectory=/opt/volley
+EnvironmentFile=/opt/volley/.env
+ExecStart=/opt/volley/.venv/bin/python -m volley
+Restart=on-failure
+RestartSec=10
+
+# Бот ходит только в api.telegram.org и пишет в свою базу
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/volley
+
+[Install]
+WantedBy=multi-user.target
