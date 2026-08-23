@@ -92,6 +92,7 @@ class VolleyService:
         if previous is not None:
             try:
                 await self.bot.unpin_chat_message(chat_id=chat_id, message_id=previous)
+                log.info("снял прошлый пин, сообщение %s", previous)
             except Exception:  # noqa: BLE001
                 log.warning("не смог снять прошлый пин %s", previous)
         try:
@@ -101,6 +102,7 @@ class VolleyService:
         except Exception:  # noqa: BLE001
             log.warning("не смог закрепить опрос: нет права на пин")
             return
+        log.info("закрепил опрос, сообщение %s", message_id)
         self.store.set_pinned_message_id(message_id)
 
     # --- FR-2, FR-3: реакция на голоса -------------------------------------

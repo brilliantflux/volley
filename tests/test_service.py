@@ -152,7 +152,13 @@ def test_previous_pin_is_removed_before_new_one(tmp_path):
     bot, store, service = build(tmp_path)
     run(service.open_poll(date(2026, 8, 20)))
     run(service.open_poll(date(2026, 8, 21)))
-    assert bot.named("unpin_chat_message")
+    yesterday, today = (call[2] for call in bot.named("pin_chat_message"))
+    # Адрес обязан различать два сообщения: снимается вчерашний пин, не свежий.
+    assert bot.named("unpin_chat_message") == [("unpin_chat_message", CHAT_ID, yesterday)]
+    # И до нового закрепления, иначе в группе на миг висят оба.
+    assert bot.calls.index(("unpin_chat_message", CHAT_ID, yesterday)) < bot.calls.index(
+        ("pin_chat_message", CHAT_ID, today)
+    )
 
 
 def test_without_known_chat_nothing_is_sent(tmp_path):

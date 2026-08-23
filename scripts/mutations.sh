@@ -185,6 +185,14 @@ run "провал создания пишет в группу" \
     "await self._say(chat_id, texts.error_text(\"создать опрос\", \"x\"))" \
     "$ROOT" "${PYTEST[@]}" tests/test_service.py
 
+# 27. Открепляется прошлый пин, а не тот же самый: адрес различает два сообщения.
+run "открепляется не прошлый пин" \
+    --expect "test_previous_pin_is_removed_before_new_one" \
+    "$ROOT/volley/service.py" \
+    "await self.bot.unpin_chat_message(chat_id=chat_id, message_id=previous)" \
+    "await self.bot.unpin_chat_message(chat_id=chat_id, message_id=message_id)" \
+    "$ROOT" "${PYTEST[@]}" tests/test_service.py
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "все мутации пойманы ✅"
