@@ -32,10 +32,10 @@ def main() -> None:
     show("приветствие при добавлении в группу", texts.greeting_text())
     show("8-й плюс: кворум, без тегов", texts.quorum_text(SQUAD))
     show("12-й плюс: набор окончен, с тегами", texts.squad_full_text(FULL))
-    show("17:00, играем", texts.closing_text(Outcome(playing=True, plus=SQUAD, count=9)))
-    show("17:00, не собрались", texts.closing_text(Outcome(playing=False, plus=SQUAD[:3], count=3)))
+    show("16:30, играем", texts.closing_text(Outcome(playing=True, plus=SQUAD, count=9)))
+    show("16:30, не собрались", texts.closing_text(Outcome(playing=False, plus=SQUAD[:3], count=3)))
     show(
-        "17:00, счёта от Telegram нет (бот лежал, админ закрыл сам)",
+        "16:30, счёта от Telegram нет (бот лежал, админ закрыл сам)",
         texts.closing_text(Outcome(playing=False, plus=SQUAD[:3], count=None)),
     )
     show("/status", texts.status_text(poll))

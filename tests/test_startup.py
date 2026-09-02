@@ -30,7 +30,7 @@ def test_catches_up_after_downtime():
 
 
 def test_no_catch_up_too_late():
-    """В 16:00 создавать опрос уже бессмысленно: игра в 18-00, закрытие в 17:00."""
+    """В 16:00 создавать опрос уже бессмысленно: игра в 17-30, закрытие в 16:30."""
     assert should_create_poll(at(16, 0), None) is False
 
 
@@ -39,19 +39,19 @@ def test_no_second_poll_when_today_already_has_one():
     assert should_create_poll(at(11, 0), poll(closed=True)) is False
 
 
-def test_closes_open_poll_at_seventeen():
-    assert should_close_now(at(17, 0), poll()) is True
+def test_closes_open_poll_at_close_time():
+    assert should_close_now(at(16, 30), poll()) is True
 
 
-def test_does_not_close_before_seventeen():
-    assert should_close_now(at(16, 59), poll()) is False
+def test_does_not_close_before_close_time():
+    assert should_close_now(at(16, 29), poll()) is False
 
 
 def test_closes_yesterdays_forgotten_poll():
-    """Бот лежал сутки: вчерашний опрос надо закрыть, не дожидаясь 17:00."""
+    """Бот лежал сутки: вчерашний опрос надо закрыть, не дожидаясь 16:30."""
     assert should_close_now(at(10, 0, day=22), poll(day="2026-08-21")) is True
 
 
 def test_already_closed_poll_is_left_alone():
-    assert should_close_now(at(17, 0), poll(closed=True)) is False
+    assert should_close_now(at(16, 30), poll(closed=True)) is False
     assert should_close_now(at(10, 0, day=22), poll(day="2026-08-21", closed=True)) is False

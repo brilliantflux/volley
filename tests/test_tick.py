@@ -1,4 +1,4 @@
-"""Один «тик» расписания: он же старт после простоя, он же 09:00, он же 17:00."""
+"""Один «тик» расписания: он же старт после простоя, он же 09:00, он же 16:30."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -81,7 +81,7 @@ def test_scheduler_has_both_daily_jobs_and_forgives_a_late_start():
 
     assert all(job.misfire_grace_time >= 3600 for job in jobs)
     assert any("hour='9'" in str(job.trigger) for job in jobs)
-    assert any("hour='17'" in str(job.trigger) for job in jobs)
+    assert any("hour='16'" in str(job.trigger) and "minute='30'" in str(job.trigger) for job in jobs)
 
 
 def test_reminder_tick_takes_todays_poll(tmp_path):
@@ -107,4 +107,4 @@ def test_scheduler_also_wakes_up_for_the_reminder():
     from volley.schedule import build_scheduler
 
     jobs = build_scheduler(service=FakeService(), store=None).get_jobs()
-    assert {job.name for job in jobs} == {"tick-09:00", "tick-15:45", "tick-17:00"}
+    assert {job.name for job in jobs} == {"tick-09:00", "tick-15:45", "tick-16:30"}

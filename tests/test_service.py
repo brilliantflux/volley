@@ -129,7 +129,7 @@ def test_daily_poll_is_non_anonymous_and_pinned(tmp_path):
 
     (call,) = bot.named("send_poll")
     assert call[1] == CHAT_ID
-    assert call[2] == "21.08 (пт) Игра 18-00"
+    assert call[2] == "21.08 (пт) Игра 17-30"
     assert call[3] == ("Плюс", "Минус", "Ответ до 16-00")
     assert call[4] is False, "анонимный опрос не даёт боту голоса — бот бесполезен"
     assert bot.named("pin_chat_message")
@@ -242,7 +242,7 @@ def test_vote_in_unknown_poll_is_ignored(tmp_path):
     assert bot.calls == []
 
 
-# --- FR-4 (17:00) -----------------------------------------------------------
+# --- FR-4 (16:30) -----------------------------------------------------------
 
 
 def test_closing_with_quorum_says_playing(tmp_path):

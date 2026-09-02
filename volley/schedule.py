@@ -20,7 +20,7 @@ def should_create_poll(now: datetime, today_poll: Poll | None) -> bool:
     """Опрос на сегодня нужен, если его ещё нет и день не прошёл.
 
     Catch-up после простоя: бот, поднявшийся в 11:00, всё равно создаёт опрос.
-    После CATCHUP_UNTIL смысла нет — закрытие в 17:00, игра в 18-00.
+    После CATCHUP_UNTIL смысла нет — закрытие в 16:30, игра в 17-30.
     """
     if today_poll is not None:
         return False
@@ -28,7 +28,7 @@ def should_create_poll(now: datetime, today_poll: Poll | None) -> bool:
 
 
 def should_close_now(now: datetime, poll: Poll) -> bool:
-    """Закрываем открытый опрос в 17:00, а забытый с прошлых дней — сразу."""
+    """Закрываем открытый опрос в 16:30, а забытый с прошлых дней — сразу."""
     if poll.closed:
         return False
     if poll.day < now.date().isoformat():
@@ -39,7 +39,7 @@ def should_close_now(now: datetime, poll: Poll) -> bool:
 async def tick(service, store, now: datetime) -> None:
     """Один проход расписания: закрыть что пора, создать опрос если нужно.
 
-    Одна и та же функция работает и как cron в 09:00, и как cron в 17:00,
+    Одна и та же функция работает и как cron в 09:00, и как cron в 16:30,
     и как catch-up при старте — решения живут в should_* и не расходятся.
     """
     for poll in store.open_polls():

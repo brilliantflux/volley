@@ -147,7 +147,7 @@ class VolleyService:
     # --- FR-4: закрытие с итогом -------------------------------------------
 
     async def close_poll(self, poll: Poll | None) -> None:
-        """Закрытие в 17:00 и по команде /close."""
+        """Закрытие в 16:30 и по команде /close."""
         if poll is None:
             return
         async with self._lock:

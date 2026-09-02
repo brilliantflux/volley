@@ -29,7 +29,7 @@ def test_plain_name_escapes_html_and_never_pings():
 
 
 def test_poll_question_has_date_weekday_and_game_time():
-    assert texts.poll_question(date(2026, 8, 21)) == "21.08 (пт) Игра 18-00"
+    assert texts.poll_question(date(2026, 8, 21)) == "21.08 (пт) Игра 17-30"
 
 
 def test_poll_options_match_the_group_habit():
