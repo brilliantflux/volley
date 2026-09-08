@@ -486,7 +486,7 @@ def test_manual_close_without_counts_never_cancels_the_game_outright(tmp_path):
     assert store.poll_by_id(poll.poll_id).closed is True
 
 
-# --- напоминание тем, кто обещал ответ к 16-00 ------------------------------
+# --- напоминание тем, кто обещал ответить позже -----------------------------
 
 
 def test_reminder_pings_only_those_who_promised_an_answer(tmp_path):
@@ -526,6 +526,33 @@ def test_reminder_without_a_poll_is_harmless(tmp_path):
     bot, store, service = build(tmp_path)
     run(service.remind_later(None))
     assert bot.calls == []
+
+
+def test_reminder_is_sent_once_a_day(tmp_path):
+    """Цикл зовёт напоминание каждую минуту — в группу оно уходит один раз."""
+    bot, store, service = build(tmp_path)
+    run(service.open_poll(date(2026, 8, 21)))
+    poll = store.poll_for_day("2026-08-21")
+    run(service.handle_vote(poll.poll_id, voter(3), [LATER]))
+
+    run(service.remind_later(store.poll_by_id(poll.poll_id)))
+    run(service.remind_later(store.poll_by_id(poll.poll_id)))
+
+    assert len(bot.texts()) == 1
+    assert store.poll_by_id(poll.poll_id).reminded is True
+
+
+def test_failed_reminder_is_not_marked_as_sent(tmp_path):
+    """Сообщение не прошло — отметка не ставится, иначе день остался бы без пинга."""
+    bot, store, service = build(tmp_path)
+    run(service.open_poll(date(2026, 8, 21)))
+    poll = store.poll_for_day("2026-08-21")
+    run(service.handle_vote(poll.poll_id, voter(3), [LATER]))
+    bot.fail_on = ("send_message",)
+
+    run(service.remind_later(store.poll_by_id(poll.poll_id)))
+
+    assert store.poll_by_id(poll.poll_id).reminded is False
 
 
 def test_failed_poll_creation_stays_out_of_the_group(tmp_path):

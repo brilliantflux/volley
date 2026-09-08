@@ -16,7 +16,7 @@ import asyncio
 import logging
 from datetime import date
 
-from . import texts
+from . import settings, texts
 from .domain import PLUS, Poll, Voter, daily_outcome, decide_after_vote
 from .store import Store
 
@@ -68,8 +68,8 @@ class VolleyService:
         try:
             message = await self.bot.send_poll(
                 chat_id=chat_id,
-                question=texts.poll_question(day),
-                options=list(texts.POLL_OPTIONS),
+                question=texts.poll_question(day, settings.value(self.store, "game_time")),
+                options=list(settings.options(self.store)),
                 is_anonymous=False,
                 allows_multiple_answers=False,
             )
@@ -131,23 +131,30 @@ class VolleyService:
             return
         # Закрытым считаем только после того, как состав объявлен: иначе
         # непрошедшее сообщение потеряет состав навсегда.
-        if await self._say(chat_id, texts.squad_full_text(poll.plus)):
+        game_time = settings.value(self.store, "game_time")
+        if await self._say(chat_id, texts.squad_full_text(poll.plus, game_time)):
             self.store.mark_closed(poll.poll_id)
 
     async def remind_later(self, poll: Poll | None) -> None:
-        """Пинг тем, кто выбрал «Ответ до 16-00»: без тегов напоминание не работает."""
-        if poll is None or poll.closed or not poll.later:
+        """Пинг тем, кто обещал ответить позже: без тегов напоминание не работает.
+
+        Отметка ставится только после удачной отправки: непрошедшее сообщение,
+        записанное как отправленное, потеряло бы напоминание на весь день.
+        """
+        if poll is None or poll.closed or poll.reminded or not poll.later:
             return
         chat_id = self.store.chat_id()
         if chat_id is None:
             return
+        close_time = settings.value(self.store, "close_time")
         async with self._lock:
-            await self._say(chat_id, texts.later_reminder_text(poll.later))
+            if await self._say(chat_id, texts.later_reminder_text(poll.later, close_time)):
+                self.store.mark_reminded(poll.poll_id)
 
     # --- FR-4: закрытие с итогом -------------------------------------------
 
     async def close_poll(self, poll: Poll | None) -> None:
-        """Закрытие в 16:30 и по команде /close."""
+        """Закрытие по расписанию и по команде /close."""
         if poll is None:
             return
         async with self._lock:
@@ -167,7 +174,8 @@ class VolleyService:
                 self.store.save_telegram_plus_count(fresh.poll_id, count)
             fresh = self.store.poll_by_id(fresh.poll_id)
             outcome = daily_outcome(fresh, plus_count=fresh.telegram_plus_count)
-            if await self._say(chat_id, texts.closing_text(outcome)):
+            game_time = settings.value(self.store, "game_time")
+            if await self._say(chat_id, texts.closing_text(outcome, game_time)):
                 self.store.mark_closed(fresh.poll_id)
 
     async def _stop_poll(self, chat_id: int, poll: Poll):
@@ -193,7 +201,9 @@ class VolleyService:
 
     async def status_text(self) -> str:
         polls = self.store.open_polls()
-        return texts.status_text(polls[-1]) if polls else texts.no_poll_text()
+        if not polls:
+            return texts.no_poll_text()
+        return texts.status_text(polls[-1], settings.value(self.store, "option_later"))
 
     async def _say(self, chat_id: int, text: str) -> bool:
         try:

@@ -1,74 +1,87 @@
-"""Когда создавать и когда закрывать опрос. Чистые решения по локальному времени."""
+"""Когда создавать, когда напоминать, когда закрывать.
+
+Планировщика с расписанием здесь нет намеренно. Один цикл раз в минуту зовёт
+идемпотентный `tick`, а тот каждый раз перечитывает времена из базы: поэтому
+смена настройки админом применяется со следующей минуты, без перепланирования
+джобов и без перезапуска процесса. Решения остаются чистыми функциями, время
+приходит в них аргументом.
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
+import asyncio
+import logging
+from datetime import datetime, time
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-
-from . import config
-from .config import CATCHUP_UNTIL, CLOSE_TIME, POLL_TIME, REMINDER_TIME
+from . import config, settings
 from .domain import Poll
 
-# Пропущенный джоб APScheduler по умолчанию просто не выполняется (грация 1 с):
-# заминка event loop в 09:00 стоила бы группе дня без опроса.
-MISFIRE_GRACE = 3600
+log = logging.getLogger(__name__)
+
+TICK_SECONDS = 60  # мельче не имеет смысла: настройки задаются с точностью до минуты
 
 
-def should_create_poll(now: datetime, today_poll: Poll | None) -> bool:
+def should_create_poll(
+    now: datetime, today_poll: Poll | None, poll_time: time, close_time: time
+) -> bool:
     """Опрос на сегодня нужен, если его ещё нет и день не прошёл.
 
     Catch-up после простоя: бот, поднявшийся в 11:00, всё равно создаёт опрос.
-    После CATCHUP_UNTIL смысла нет — закрытие в 16:30, игра в 17-30.
+    Верхняя граница — время закрытия: опрос, который пора закрывать, создавать
+    незачем. Отдельной константы на это больше нет, чтобы правка времени
+    закрытия не оставляла рядом устаревшее число.
     """
     if today_poll is not None:
         return False
-    return POLL_TIME <= now.time() < CATCHUP_UNTIL
+    return poll_time <= now.time() < close_time
 
 
-def should_close_now(now: datetime, poll: Poll) -> bool:
-    """Закрываем открытый опрос в 16:30, а забытый с прошлых дней — сразу."""
+def should_close_now(now: datetime, poll: Poll, close_time: time) -> bool:
+    """Закрываем открытый опрос в его время, а забытый с прошлых дней — сразу."""
     if poll.closed:
         return False
     if poll.day < now.date().isoformat():
         return True
-    return now.time() >= CLOSE_TIME
+    return now.time() >= close_time
+
+
+def should_remind(now: datetime, poll: Poll | None, reminder_time: time) -> bool:
+    """Напоминание уходит один раз за день и только тем, кто обещал ответить."""
+    if poll is None or poll.closed or poll.reminded or not poll.later:
+        return False
+    return now.time() >= reminder_time
 
 
 async def tick(service, store, now: datetime) -> None:
-    """Один проход расписания: закрыть что пора, создать опрос если нужно.
+    """Один проход расписания. Идемпотентен: лишний вызов ничего не дублирует.
 
-    Одна и та же функция работает и как cron в 09:00, и как cron в 16:30,
-    и как catch-up при старте — решения живут в should_* и не расходятся.
+    Порядок важен: сначала закрываем, потом напоминаем. Иначе в тике, попавшем
+    на время закрытия, группа получила бы и напоминание, и итог сразу за ним.
     """
+    close_time = settings.time_value(store, "close_time")
     for poll in store.open_polls():
-        if should_close_now(now, poll):
+        if should_close_now(now, poll, close_time):
             await service.close_poll(poll)
-    if should_create_poll(now, store.poll_for_day(now.date().isoformat())):
+
+    today = now.date().isoformat()
+    poll = store.poll_for_day(today)
+    if should_remind(now, poll, settings.time_value(store, "reminder_time")):
+        await service.remind_later(poll)
+
+    poll_time = settings.time_value(store, "poll_time")
+    if should_create_poll(now, poll, poll_time, close_time):
         await service.open_poll(now.date())
 
 
-def build_scheduler(service, store) -> AsyncIOScheduler:
-    """Три будильника: поставить опрос, напомнить обещавшим ответ, закрыть с итогом."""
-    scheduler = AsyncIOScheduler(timezone=config.TZ)
-    jobs = ((POLL_TIME, run_tick), (REMINDER_TIME, remind_tick), (CLOSE_TIME, run_tick))
-    for moment, job in jobs:
-        scheduler.add_job(
-            job,
-            CronTrigger(hour=moment.hour, minute=moment.minute, timezone=config.TZ),
-            args=[service, store],
-            name=f"tick-{moment:%H:%M}",
-            misfire_grace_time=MISFIRE_GRACE,
-        )
-    return scheduler
+async def run_loop(service, store, interval: float = TICK_SECONDS) -> None:
+    """Единственный будильник бота.
 
-
-async def remind_tick(service, store) -> None:
-    """Напомнить тем, кто обещал ответить к дедлайну. Простой таймер, без catch-up."""
-    today = datetime.now(config.TZ).date().isoformat()
-    await service.remind_later(store.poll_for_day(today) if store else None)
-
-
-async def run_tick(service, store) -> None:
-    await tick(service, store, datetime.now(config.TZ))
+    Исключение внутри тика гасится здесь: в отличие от планировщика, у своего
+    цикла необработанная ошибка убила бы расписание навсегда и молча.
+    """
+    while True:
+        try:
+            await tick(service, store, datetime.now(config.TZ))
+        except Exception:  # noqa: BLE001 — тик падает, расписание продолжает жить
+            log.exception("тик расписания не прошёл, следующий будет через %s с", interval)
+        await asyncio.sleep(interval)

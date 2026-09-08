@@ -8,7 +8,7 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.filters import Command
 
-from . import texts
+from . import settings, texts
 from .config import TZ
 from .domain import Voter
 from .store import Store
@@ -16,6 +16,7 @@ from .store import Store
 log = logging.getLogger(__name__)
 
 GROUP_TYPES = ("group", "supergroup")
+PRIVATE = "private"
 JOINED_STATUSES = ("member", "administrator", "creator")
 
 
@@ -40,7 +41,12 @@ async def on_my_chat_member(event, store: Store, bot) -> None:
 
     store.set_chat_id(event.chat.id)
     log.info("привязался к чату %s", event.chat.id)
-    await bot.send_message(chat_id=event.chat.id, text=texts.greeting_text())
+    await bot.send_message(
+        chat_id=event.chat.id,
+        text=texts.greeting_text(
+            settings.value(store, "poll_time"), settings.value(store, "close_time")
+        ),
+    )
 
 
 async def on_migrate(message, store: Store) -> None:
@@ -71,8 +77,19 @@ async def on_poll_answer(answer, service) -> None:
 
 
 async def _allowed(message, store: Store, bot) -> bool:
+    """Команду выполняет админ ПРИВЯЗАННОЙ группы — хоть из неё, хоть из лички.
+
+    Личка не заводит второй источник прав: список админов всё равно берётся у
+    группы. Чужой групповой чат по-прежнему игнорируется молча, а вот админу в
+    личке молчать нельзя — тишина в ответ на команду читается как поломка.
+    """
+    private = message.chat.type == PRIVATE
     chat_id = store.chat_id()
-    if chat_id is None or message.chat.id != chat_id:
+    if chat_id is None:
+        if private:
+            await message.reply(texts.no_group_yet_text())
+        return False
+    if not private and message.chat.id != chat_id:
         return False
     try:
         admins = await bot.get_chat_administrators(chat_id)
@@ -112,6 +129,31 @@ async def cmd_status(message, service, store: Store, bot) -> None:
     await message.reply(await service.status_text())
 
 
+async def cmd_settings(message, store: Store, bot) -> None:
+    if not await _allowed(message, store, bot):
+        return
+    await message.reply(texts.settings_text(settings.current(store)))
+
+
+async def cmd_set(message, command, store: Store, bot) -> None:
+    """Одна команда — одна настройка: пачкой их менять некому и незачем."""
+    if not await _allowed(message, store, bot):
+        return
+    key, _, raw = (command.args or "").strip().partition(" ")
+    if not key or not raw.strip():
+        await message.reply(texts.setting_usage_text())
+        return
+    try:
+        value = settings.set_value(store, key, raw)
+    except KeyError:
+        await message.reply(texts.setting_unknown_text(key, list(settings.BY_KEY)))
+    except ValueError as error:
+        await message.reply(texts.setting_rejected_text(str(error)))
+    else:
+        log.info("админ %s сменил %s на %r", message.from_user.id, key, value)
+        await message.reply(texts.setting_saved_text(settings.BY_KEY[key].title, value))
+
+
 def build_router() -> Router:
     router = Router(name="volley")
     router.my_chat_member.register(on_my_chat_member)
@@ -120,4 +162,6 @@ def build_router() -> Router:
     router.message.register(cmd_poll, Command("poll"))
     router.message.register(cmd_close, Command("close"))
     router.message.register(cmd_status, Command("status"))
+    router.message.register(cmd_settings, Command("settings"))
+    router.message.register(cmd_set, Command("set"))
     return router

@@ -27,6 +27,7 @@ class Poll:
     closed: bool = False
     quorum_announced: bool = False
     close_error_notified: bool = False
+    reminded: bool = False  # напоминание обещавшим ответ уже ушло
     telegram_plus_count: int | None = None  # счёт, который Telegram дал при закрытии
     votes: dict[int, tuple[int, Voter]] = field(default_factory=dict)
 

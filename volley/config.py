@@ -1,24 +1,26 @@
-"""Настройки: расписание дня и пути. Секрет — только из окружения."""
+"""Настройки процесса: часовой пояс, пути, секрет из окружения.
+
+Времена и тексты вариантов здесь — только ДЕФОЛТЫ, с которых бот начинает на
+чистой базе. Живое значение админ меняет командой, и читать его надо через
+`settings.py`, а не отсюда: иначе одна и та же величина окажется в двух местах.
+"""
 
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Europe/Sofia")
 
-POLL_TIME = time(9, 0)  # когда бот постит опрос
-CLOSE_TIME = time(16, 30)  # когда закрывает, если состав не набрался раньше
-CATCHUP_UNTIL = time(16, 0)  # позже этого времени пропущенный опрос уже не создаём
-GAME_TIME = "17-30"
+GAME_TIME = "17-30"  # во сколько игра — попадает только в текст опроса
+POLL_TIME = "09:00"  # когда бот постит опрос
+REMINDER_TIME = "15:45"  # когда тегает обещавших ответить
+CLOSE_TIME = "16:30"  # когда закрывает, если состав не набрался раньше
 
-# Третий вариант опроса обещает ответ к этому времени; напоминание считается от
-# него, чтобы правка дедлайна двигала и текст варианта, и время напоминания.
-LATER_DEADLINE = time(16, 0)
-REMINDER_LEAD = timedelta(minutes=15)
-REMINDER_TIME = (datetime.combine(date(2000, 1, 1), LATER_DEADLINE) - REMINDER_LEAD).time()
+OPTION_PLUS = "Плюс"
+OPTION_MINUS = "Минус"
+OPTION_LATER = "Ответ до 16-00"
 
 DEFAULT_DB = Path.home() / ".local" / "share" / "volley" / "state.db"
 

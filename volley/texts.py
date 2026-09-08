@@ -1,19 +1,26 @@
-"""Тексты для группы. Теги — только там, где пинг уместен."""
+"""Тексты для группы. Теги — только там, где пинг уместен.
+
+Времена и варианты ответа приходят аргументами: их значение живёт в базе и
+меняется админом на ходу, поэтому собственных копий здесь нет.
+"""
 
 from __future__ import annotations
 
 import html
 from datetime import date
 
-from .config import CLOSE_TIME, GAME_TIME, LATER_DEADLINE, POLL_TIME, REMINDER_LEAD
 from .domain import FULL_SQUAD, QUORUM, Outcome, Poll, Voter
 
-POLL_OPTIONS = ("Плюс", "Минус", f"Ответ до {LATER_DEADLINE:%H-%M}")
 WEEKDAYS = ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
 
 
-def poll_question(day: date) -> str:
-    return f"{day:%d.%m} ({WEEKDAYS[day.weekday()]}) Игра {GAME_TIME}"
+def dashed(clock: str) -> str:
+    """«17:30» → «17-30»: так время игры пишут в самой группе."""
+    return clock.replace(":", "-")
+
+
+def poll_question(day: date, game_time: str) -> str:
+    return f"{day:%d.%m} ({WEEKDAYS[day.weekday()]}) Игра {dashed(game_time)}"
 
 
 def plain_name(voter: Voter) -> str:
@@ -43,18 +50,18 @@ def quorum_text(plus: list[Voter]) -> str:
     )
 
 
-def squad_full_text(plus: list[Voter]) -> str:
+def squad_full_text(plus: list[Voter], game_time: str) -> str:
     return (
-        f"Набор окончен: {len(plus)} человек, играем в {GAME_TIME} 🏐\n"
+        f"Набор окончен: {len(plus)} человек, играем в {dashed(game_time)} 🏐\n"
         f"{_mentions(plus)}\n"
         f"Замен нет, не опаздываем."
     )
 
 
-def closing_text(outcome: Outcome) -> str:
+def closing_text(outcome: Outcome, game_time: str) -> str:
     if outcome.playing:
         return (
-            f"Опрос закрыт. Играем в {GAME_TIME}, {outcome.total} человек 🏐\n"
+            f"Опрос закрыт. Играем в {dashed(game_time)}, {outcome.total} человек 🏐\n"
             f"{_mentions(outcome.plus)}"
         )
     if outcome.count is None:
@@ -69,21 +76,18 @@ def closing_text(outcome: Outcome) -> str:
     return f"Опрос закрыт. Плюсов {outcome.total} из {QUORUM} — игры сегодня нет."
 
 
-def status_text(poll: Poll) -> str:
+def status_text(poll: Poll, later_option: str) -> str:
     head = (
         f"Опрос на {date.fromisoformat(poll.day):%d.%m}: "
         f"плюсов {len(poll.plus)} из {FULL_SQUAD}, "
-        f"«ответ до 16-00» — {len(poll.later)}."
+        f"«{later_option}» — {len(poll.later)}."
     )
     return f"{head}\n{_names(poll.plus)}" if poll.plus else head
 
 
-def later_reminder_text(later: list[Voter]) -> str:
-    minutes = int(REMINDER_LEAD.total_seconds() // 60)
-    return (
-        f"{_mentions(later)} — до {LATER_DEADLINE:%H-%M} осталось {minutes} минут. "
-        f"Плюс или минус?"
-    )
+def later_reminder_text(later: list[Voter], close_time: str) -> str:
+    """Напоминание считает от закрытия опроса: это единственный настоящий дедлайн."""
+    return f"{_mentions(later)} — опрос закроется в {close_time}. Плюс или минус?"
 
 
 def no_poll_text() -> str:
@@ -104,16 +108,16 @@ def error_text(action: str, error: str) -> str:
     )
 
 
-def greeting_text() -> str:
+def greeting_text(poll_time: str, close_time: str) -> str:
     return (
         "Привет! Теперь опрос на игру буду ставить я.\n"
-        f"Каждый день в {POLL_TIME:%H:%M} — новый опрос, закрою его при "
-        f"{FULL_SQUAD} плюсах или в {CLOSE_TIME:%H:%M}.\n"
+        f"Каждый день в {poll_time} — новый опрос, закрою его при "
+        f"{FULL_SQUAD} плюсах или в {close_time}.\n"
         f"При {QUORUM} плюсах напишу, что игра состоится.\n\n"
         "Чтобы это работало, мне нужны права администратора: отправлять опросы "
         "и закреплять сообщения.\n"
         "Команды для админов: /poll — опрос вне расписания, /close — закрыть "
-        "досрочно, /status — сколько плюсов сейчас."
+        "досрочно, /status — сколько плюсов сейчас, /settings — что можно менять."
     )
 
 
@@ -123,3 +127,41 @@ def not_admin_text() -> str:
 
 def admin_check_failed_text() -> str:
     return "Не смог проверить права — Telegram не ответил. Попробуй ещё раз."
+
+
+def no_group_yet_text() -> str:
+    return "Меня ещё не добавили в группу — сначала туда, потом настройки."
+
+
+# --- настройки --------------------------------------------------------------
+
+
+def settings_text(rows: list[tuple]) -> str:
+    """Что можно менять и что стоит сейчас. Ключ показываем: им же и задают."""
+    lines = [f"<code>{setting.key}</code> — {setting.title}: {value}" for setting, value in rows]
+    return "Настройки:\n" + "\n".join(lines) + "\n\n" + setting_usage_text()
+
+
+def setting_usage_text() -> str:
+    return (
+        "Меняется по одной: <code>/set ключ значение</code>\n"
+        "Например: <code>/set close_time 18:00</code> или "
+        "<code>/set option_later Отвечу к обеду</code>"
+    )
+
+
+def setting_saved_text(title: str, value: str) -> str:
+    """Про момент вступления в силу — честно: у времён он один, у текстов другой."""
+    return (
+        f"Готово, {title}: {value}.\n"
+        f"Времена работают со следующей минуты, тексты — со следующего опроса: "
+        f"уже висящий опрос Telegram переписать не даёт."
+    )
+
+
+def setting_unknown_text(key: str, known: list[str]) -> str:
+    return f"Не знаю настройки «{html.escape(key)}». Есть: {', '.join(known)}."
+
+
+def setting_rejected_text(reason: str) -> str:
+    return f"Не принял: {reason}."

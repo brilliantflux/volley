@@ -64,8 +64,8 @@ run "гейт админа пропускает всех" \
 # 7. Команды из чужого чата не исполняются.
 run "команды принимаются из любого чата" \
     --expect "test_command_from_foreign_chat_is_ignored" \
-    "$ROOT/volley/handlers.py" "if chat_id is None or message.chat.id != chat_id:" \
-    "if chat_id is None:" \
+    "$ROOT/volley/handlers.py" "if not private and message.chat.id != chat_id:" \
+    "if False:" \
     "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
 
 # 8. Первая привязка выигрывает: посторонний чат не перетягивает опросы.
@@ -81,10 +81,11 @@ run "ошибка закрытия спамит чат" \
     "if await self._say(" \
     "$ROOT" "${PYTEST[@]}" tests/test_service.py
 
-# 10. Catch-up имеет дедлайн: в 16:00 опрос создавать уже поздно.
+# 10. Catch-up имеет дедлайн: опрос, который пора закрывать, создавать поздно.
 run "catch-up без дедлайна" \
     --expect "test_no_catch_up_too_late" \
-    "$ROOT/volley/schedule.py" "POLL_TIME <= now.time() < CATCHUP_UNTIL" "POLL_TIME <= now.time()" \
+    "$ROOT/volley/schedule.py" "return poll_time <= now.time() < close_time" \
+    "return poll_time <= now.time()" \
     "$ROOT" "${PYTEST[@]}" tests/test_startup.py
 
 # 11. Замок держит конкурентные апдейты: без него два голоса дают два кворума.
@@ -133,13 +134,15 @@ run "уже закрытый опрос считается ошибкой пра
 # 18. Итог считается доведённым только после публикации.
 run "закрытие фиксируется без публикации итога" \
     --expect "test_outcome_survives_a_failed_first_announcement" \
-    "$ROOT/volley/service.py" "if await self._say(chat_id, texts.closing_text(outcome)):" "if True:" \
+    "$ROOT/volley/service.py" \
+    "if await self._say(chat_id, texts.closing_text(outcome, game_time)):" "if True:" \
     "$ROOT" "${PYTEST[@]}" tests/test_service.py
 
 # 19. То же для состава при полном наборе.
 run "состав теряется при сбое отправки" \
     --expect "test_squad_message_failure_keeps_the_poll_open_in_the_ledger" \
-    "$ROOT/volley/service.py" "if await self._say(chat_id, texts.squad_full_text(poll.plus)):" "if True:" \
+    "$ROOT/volley/service.py" \
+    "if await self._say(chat_id, texts.squad_full_text(poll.plus, game_time)):" "if True:" \
     "$ROOT" "${PYTEST[@]}" tests/test_service.py
 
 # 20. Счёт Telegram сохраняется, иначе повтор публикации «отменит» игру.
@@ -154,11 +157,12 @@ run "миграция схемы не выполняется" \
     "$ROOT/volley/store.py" "        self._migrate()" "        pass" \
     "$ROOT" "${PYTEST[@]}" tests/test_store.py
 
-# 22. Пропущенный джоб наверстывается, а не теряет день.
-run "грация планировщика — секунда" \
-    --expect "test_scheduler_has_both_daily_jobs_and_forgives_a_late_start" \
-    "$ROOT/volley/schedule.py" "misfire_grace_time=MISFIRE_GRACE" "misfire_grace_time=1" \
-    "$ROOT" "${PYTEST[@]}" tests/test_tick.py
+# 22. Упавший тик не уносит с собой всё расписание: цикл переживает исключение.
+run "исключение в тике убивает цикл" \
+    --expect "test_loop_survives_a_failing_tick" \
+    "$ROOT/volley/schedule.py" "except Exception:  # noqa: BLE001" \
+    "except asyncio.CancelledError:  # noqa: BLE001" \
+    "$ROOT" "${PYTEST[@]}" tests/test_settings.py
 
 # 23. Отрицательный вывод из неполных данных запрещён: «игры нет» только по счёту Telegram.
 run "неполные данные дают категоричное «игры нет»" \
@@ -175,7 +179,8 @@ run "сбой проверки прав молчит" \
 # 25. Напоминание адресовано только обещавшим ответ и только в открытом опросе.
 run "напоминание летит кому попало" \
     --expect "test_no_reminder_in_a_closed_poll" \
-    "$ROOT/volley/service.py" "if poll is None or poll.closed or not poll.later:" "if poll is None:" \
+    "$ROOT/volley/service.py" \
+    "if poll is None or poll.closed or poll.reminded or not poll.later:" "if poll is None:" \
     "$ROOT" "${PYTEST[@]}" tests/test_service.py
 
 # 26. Провал создания опроса не выносится в группу.
@@ -192,6 +197,42 @@ run "открепляется не прошлый пин" \
     "await self.bot.unpin_chat_message(chat_id=chat_id, message_id=previous)" \
     "await self.bot.unpin_chat_message(chat_id=chat_id, message_id=message_id)" \
     "$ROOT" "${PYTEST[@]}" tests/test_service.py
+
+# 28. Сохранённая настройка сильнее дефолта — иначе команды админа бесполезны.
+run "настройка из базы игнорируется" \
+    --expect "test_saved_value_wins_and_survives_reopen" \
+    "$ROOT/volley/settings.py" \
+    "return saved if saved is not None else setting.normalize(setting.default)" \
+    "return setting.normalize(setting.default)" \
+    "$ROOT" "${PYTEST[@]}" tests/test_settings.py
+
+# 29. Время проверяется на входе: 25:00 не должно доехать до расписания.
+run "часы больше 23 принимаются" \
+    --expect "test_impossible_clock_time_is_refused" \
+    "$ROOT/volley/settings.py" "if not (0 <= hour <= 23 and 0 <= minute <= 59):" "if False:" \
+    "$ROOT" "${PYTEST[@]}" tests/test_settings.py
+
+# 30. Отметка о напоминании — единственное, что мешает циклу пинговать каждую минуту.
+run "напоминание не отмечается отправленным" \
+    --expect "test_reminder_is_sent_once_a_day" \
+    "$ROOT/volley/service.py" "self.store.mark_reminded(poll.poll_id)" "pass" \
+    "$ROOT" "${PYTEST[@]}" tests/test_service.py
+
+# 31. Тик спрашивает отметку, а не только «открыт ли опрос».
+run "тик напоминает, не глядя на отметку" \
+    --expect "test_reminder_goes_out_once_even_if_the_tick_repeats" \
+    "$ROOT/volley/schedule.py" \
+    "if poll is None or poll.closed or poll.reminded or not poll.later:" \
+    "if poll is None or poll.closed or not poll.later:" \
+    "$ROOT" "${PYTEST[@]}" tests/test_settings.py
+
+# 32. Личка не обходит гейт по админам привязанной группы.
+run "в личке права не проверяются" \
+    --expect "test_stranger_cannot_change_settings_in_private" \
+    "$ROOT/volley/handlers.py" \
+    "if message.from_user.id not in {admin.user.id for admin in admins}:" \
+    "if False:" \
+    "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
 
 echo
 if [ "$FAILED" -eq 0 ]; then

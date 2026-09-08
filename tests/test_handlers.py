@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
-from volley import handlers
+from volley import handlers, settings
 from volley.domain import PLUS
 from volley.store import Store
 
@@ -58,11 +58,12 @@ class FakeMessage:
     chat_id: int = CHAT_ID
     user_id: int = ADMIN_ID
     migrate_to_chat_id: int | None = None
+    chat_type: str = "supergroup"
     replies: list[str] = field(default_factory=list)
 
     @property
     def chat(self):
-        return SimpleNamespace(id=self.chat_id, type="supergroup")
+        return SimpleNamespace(id=self.chat_id, type=self.chat_type)
 
     @property
     def from_user(self):
@@ -260,3 +261,119 @@ def test_command_survives_a_failed_admin_check(tmp_path):
 
     assert service.calls == []
     assert message.replies
+
+
+# --- настройки: команды админа в группе и в личке ---------------------------
+
+
+def private(user_id=ADMIN_ID):
+    """В личке chat.id совпадает с id пользователя — привязка группы тут ни при чём."""
+    return FakeMessage(chat_id=user_id, user_id=user_id, chat_type="private")
+
+
+def cmd(args: str | None):
+    return SimpleNamespace(args=args)
+
+
+def test_admin_changes_a_setting_from_a_private_chat(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    run(handlers.cmd_set(private(), command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "18:00"
+    assert bot.named("get_chat_administrators") == [("get_chat_administrators", CHAT_ID)], (
+        "права в личке проверяются по списку админов ПРИВЯЗАННОЙ группы"
+    )
+
+
+def test_stranger_cannot_change_settings_in_private(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private(MEMBER_ID)
+    run(handlers.cmd_set(message, command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "16:30"
+    assert message.replies and "админ" in message.replies[0].lower()
+
+
+def test_member_in_the_group_cannot_change_settings(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = FakeMessage(user_id=MEMBER_ID)
+    run(handlers.cmd_set(message, command=cmd("close_time 18-00"), store=store, bot=bot))
+    assert settings.value(store, "close_time") == "16:30"
+
+
+def test_private_command_before_the_bot_knows_the_group(tmp_path):
+    """Бота ещё не добавили в группу: спрашивать админов не у кого, но и падать нельзя."""
+    store, bot = Store(tmp_path / "state.db"), FakeBot()
+    message = private()
+    run(handlers.cmd_set(message, command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "16:30"
+    assert message.replies
+
+
+def test_admin_sees_the_new_value_in_the_answer(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_set(message, command=cmd("game_time 19-00"), store=store, bot=bot))
+    assert message.replies and "19" in message.replies[0]
+
+
+def test_bad_value_is_explained_and_not_saved(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_set(message, command=cmd("close_time вечером"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "16:30"
+    assert message.replies, "молчание в ответ на команду читается как поломка"
+
+
+def test_unknown_setting_is_explained(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_set(message, command=cmd("кворум 5"), store=store, bot=bot))
+    assert message.replies
+
+
+def test_set_without_arguments_shows_what_it_expects(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_set(message, command=cmd(None), store=store, bot=bot))
+    assert message.replies and "close_time" in message.replies[0]
+
+
+def test_one_setting_at_a_time_the_rest_are_untouched(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    run(handlers.cmd_set(private(), command=cmd("poll_time 08:00"), store=store, bot=bot))
+
+    assert settings.value(store, "poll_time") == "08:00"
+    assert settings.value(store, "close_time") == "16:30"
+    assert settings.value(store, "option_plus") == "Плюс"
+
+
+def test_option_text_with_spaces_survives_intact(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    run(
+        handlers.cmd_set(
+            private(), command=cmd("option_later Отвечу до обеда"), store=store, bot=bot
+        )
+    )
+    assert settings.value(store, "option_later") == "Отвечу до обеда"
+
+
+def test_settings_command_shows_every_current_value(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    settings.set_value(store, "close_time", "18:00")
+    message = private()
+    run(handlers.cmd_settings(message, store=store, bot=bot))
+
+    (answer,) = message.replies
+    assert "18:00" in answer
+    for key in ("game_time", "poll_time", "reminder_time", "close_time", "option_plus"):
+        assert key in answer, f"{key} не видно в /settings"
+
+
+def test_settings_is_not_for_members(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = FakeMessage(user_id=MEMBER_ID)
+    run(handlers.cmd_settings(message, store=store, bot=bot))
+    assert message.replies and "админ" in message.replies[0].lower()

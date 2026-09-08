@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS polls (
     closed               INTEGER NOT NULL DEFAULT 0,
     quorum_announced     INTEGER NOT NULL DEFAULT 0,
     close_error_notified INTEGER NOT NULL DEFAULT 0,
+    reminded             INTEGER NOT NULL DEFAULT 0,
     telegram_plus_count  INTEGER
 );
 CREATE TABLE IF NOT EXISTS votes (
@@ -51,6 +52,7 @@ class Store:
         этого шага живая база осталась бы со старой схемой.
         """
         self._ensure_column("polls", "telegram_plus_count", "telegram_plus_count INTEGER")
+        self._ensure_column("polls", "reminded", "reminded INTEGER NOT NULL DEFAULT 0")
 
     def _ensure_column(self, table: str, column: str, ddl: str) -> None:
         present = {row["name"] for row in self._db.execute(f"PRAGMA table_info({table})")}
@@ -59,11 +61,11 @@ class Store:
 
     # --- настройки ---------------------------------------------------------
 
-    def _setting(self, key: str) -> str | None:
+    def setting(self, key: str) -> str | None:
         row = self._db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
-    def _set_setting(self, key: str, value: str) -> None:
+    def set_setting(self, key: str, value: str) -> None:
         self._db.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -71,18 +73,18 @@ class Store:
         )
 
     def chat_id(self) -> int | None:
-        value = self._setting("chat_id")
+        value = self.setting("chat_id")
         return int(value) if value is not None else None
 
     def set_chat_id(self, chat_id: int) -> None:
-        self._set_setting("chat_id", str(chat_id))
+        self.set_setting("chat_id", str(chat_id))
 
     def pinned_message_id(self) -> int | None:
-        value = self._setting("pinned_message_id")
+        value = self.setting("pinned_message_id")
         return int(value) if value is not None else None
 
     def set_pinned_message_id(self, message_id: int) -> None:
-        self._set_setting("pinned_message_id", str(message_id))
+        self.set_setting("pinned_message_id", str(message_id))
 
     # --- опросы -----------------------------------------------------------
 
@@ -119,6 +121,7 @@ class Store:
             closed=bool(row["closed"]),
             quorum_announced=bool(row["quorum_announced"]),
             close_error_notified=bool(row["close_error_notified"]),
+            reminded=bool(row["reminded"]),
             telegram_plus_count=row["telegram_plus_count"],
         )
         votes = self._db.execute(
@@ -173,4 +176,8 @@ class Store:
 
     def mark_close_error_notified(self, poll_id: str) -> None:
         self._set_flag(poll_id, "close_error_notified")
+
+    def mark_reminded(self, poll_id: str) -> None:
+        """Напоминание за день ушло. Без этой отметки цикл повторял бы его каждую минуту."""
+        self._set_flag(poll_id, "reminded")
 
