@@ -8,8 +8,7 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.filters import Command
 
-from . import settings, texts
-from .config import TZ
+from . import config, settings, texts
 from .domain import Voter
 from .store import Store
 
@@ -82,6 +81,10 @@ async def _allowed(message, store: Store, bot) -> bool:
     Личка не заводит второй источник прав: список админов всё равно берётся у
     группы. Чужой групповой чат по-прежнему игнорируется молча, а вот админу в
     личке молчать нельзя — тишина в ответ на команду читается как поломка.
+
+    Владелец бота из `VOLLEY_OWNER_ID` — единственное исключение: он ставил
+    бота, но админом группы быть не обязан, а повысить его там может только
+    создатель. Чужой чат это исключение своим не делает.
     """
     private = message.chat.type == PRIVATE
     chat_id = store.chat_id()
@@ -91,6 +94,8 @@ async def _allowed(message, store: Store, bot) -> bool:
         return False
     if not private and message.chat.id != chat_id:
         return False
+    if message.from_user.id == config.owner_id():
+        return True
     try:
         admins = await bot.get_chat_administrators(chat_id)
     except Exception:  # noqa: BLE001 — сбой проверки не должен оставлять команду без ответа
@@ -103,13 +108,26 @@ async def _allowed(message, store: Store, bot) -> bool:
     return True
 
 
+async def cmd_start(message) -> None:
+    """Ответ на «Запустить» в личке — единственная команда без проверки прав.
+
+    Telegram показывает эту кнопку любому, кто открыл бота, и тишина в ответ на
+    первое же сообщение читается как поломка. Скрывать тут нечего: имена команд
+    не секрет, а выполнить их всё равно даст только гейт. В группе /start —
+    чужой шум, поэтому там молчим.
+    """
+    if message.chat.type != PRIVATE:
+        return
+    await message.reply(texts.start_text())
+
+
 async def cmd_poll(message, service, store: Store, bot) -> None:
     if not await _allowed(message, store, bot):
         return
     # Проверку «а нет ли уже опроса» делает сам сервис под своим замком:
     # здесь она была бы гонкой с тиком расписания, а молчание в ответ на
     # команду читается как «бот сломался».
-    if not await service.open_poll(datetime.now(TZ).date()):
+    if not await service.open_poll(datetime.now(config.TZ).date()):
         await message.reply(texts.poll_not_created_text())
 
 
@@ -159,6 +177,7 @@ def build_router() -> Router:
     router.my_chat_member.register(on_my_chat_member)
     router.poll_answer.register(on_poll_answer)
     router.message.register(on_migrate, F.migrate_to_chat_id)
+    router.message.register(cmd_start, Command("start"))
     router.message.register(cmd_poll, Command("poll"))
     router.message.register(cmd_close, Command("close"))
     router.message.register(cmd_status, Command("status"))

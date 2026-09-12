@@ -2,16 +2,25 @@
 # Испытание тестов мутациями: каждый инвариант ломается нарочно, прогон должен
 # покраснеть ИМЕННО на своём тесте. Зелёный набор без этого — только имитация.
 #
-# Запуск: bash scripts/mutations.sh
+# Запуск: bash scripts/mutations.sh          — все испытания
+#         bash scripts/mutations.sh 7 33 34  — только эти номера (нумерация ниже
+#         по порядку вызовов): полный прогон долгий, и на загруженной машине его
+#         убивают на середине, а куском он доходит до конца.
 set -eu
 
 ROOT=$(git rev-parse --show-toplevel)
 MUTATE=${MUTATE:-$HOME/git/claude/scripts/mutate_check.sh}
 PYTEST=("$ROOT/.venv/bin/python" -m pytest -q)
 
+ONLY=${*:-}
 FAILED=0
+NUMBER=0
 run() {
     local title=$1; shift
+    NUMBER=$((NUMBER + 1))
+    if [ -n "$ONLY" ] && ! printf '%s\n' $ONLY | grep -qx "$NUMBER"; then
+        return 0
+    fi
     echo
     echo "──────── $title"
     if bash "$MUTATE" "$@"; then
@@ -234,9 +243,27 @@ run "в личке права не проверяются" \
     "if False:" \
     "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
 
+# 33. Владелец из .env — единственный, кто обходит список админов группы.
+run "владелец бота теряет права" \
+    --expect "test_owner_changes_settings_without_being_a_group_admin" \
+    "$ROOT/volley/config.py" "return int(value)" "return None" \
+    "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
+
+# 34. Опечатка в переменной гасит владельца, но не команду целиком.
+run "мусор в VOLLEY_OWNER_ID валит команду" \
+    --expect "test_garbage_in_the_variable_leaves_the_gate_working" \
+    "$ROOT/volley/config.py" "if not value.isdigit():" "if False:" \
+    "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
+
+# 35. /start отвечает только в личке: в группе это чужой шум.
+run "/start отвечает в группе" \
+    --expect "test_start_is_silent_in_the_group" \
+    "$ROOT/volley/handlers.py" "if message.chat.type != PRIVATE:" "if False:" \
+    "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
+
 echo
 if [ "$FAILED" -eq 0 ]; then
-    echo "все мутации пойманы ✅"
+    echo "мутации пойманы ✅ (испытаний в прогоне: ${ONLY:-все $NUMBER})"
 else
     echo "не поймано мутаций: $FAILED ❌"
 fi

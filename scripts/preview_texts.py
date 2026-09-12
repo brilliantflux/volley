@@ -59,6 +59,7 @@ def main() -> None:
     show("/status", texts.status_text(poll, later_option))
     show("/status без опроса", texts.no_poll_text())
     show("/poll не сработал", texts.poll_not_created_text())
+    show("/start в личке", texts.start_text())
     show("команда не от админа", texts.not_admin_text())
     show("/settings", texts.settings_text(settings.current(store)))
     show("/set принял значение", texts.setting_saved_text("когда закрывать опрос", "18:00"))

@@ -25,7 +25,7 @@ fi
 
 # .env создаётся один раз пустым: токен вписывает человек, деплой его не трогает
 if [ ! -f "$CODE/.env" ]; then
-    printf 'VOLLEY_BOT_TOKEN=\nVOLLEY_DB=%s/state.db\n' "$DATA" > "$CODE/.env"
+    printf 'VOLLEY_BOT_TOKEN=\nVOLLEY_DB=%s/state.db\nVOLLEY_OWNER_ID=\n' "$DATA" > "$CODE/.env"
     chmod 600 "$CODE/.env"
 fi
 

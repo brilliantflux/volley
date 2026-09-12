@@ -377,3 +377,76 @@ def test_settings_is_not_for_members(tmp_path):
     message = FakeMessage(user_id=MEMBER_ID)
     run(handlers.cmd_settings(message, store=store, bot=bot))
     assert message.replies and "админ" in message.replies[0].lower()
+
+
+# --- владелец бота и первое сообщение в личке -------------------------------
+
+OWNER_ID = 424242  # выдуманный: настоящий id владельца живёт в .env на сервере, не в git
+
+
+def test_owner_changes_settings_without_being_a_group_admin(tmp_path, monkeypatch):
+    """Владелец бота не обязан быть админом группы: повысить его может только создатель."""
+    monkeypatch.setenv("VOLLEY_OWNER_ID", str(OWNER_ID))
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    run(handlers.cmd_set(private(OWNER_ID), command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "18:00"
+    assert bot.named("get_chat_administrators") == [], "владельца бот знает и без Telegram"
+
+
+def test_owner_is_one_id_and_not_a_free_pass(tmp_path, monkeypatch):
+    monkeypatch.setenv("VOLLEY_OWNER_ID", str(OWNER_ID))
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private(MEMBER_ID)
+    run(handlers.cmd_set(message, command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "16:30"
+    assert message.replies and "админ" in message.replies[0].lower()
+
+
+def test_without_the_variable_the_owner_is_a_stranger(tmp_path, monkeypatch):
+    monkeypatch.delenv("VOLLEY_OWNER_ID", raising=False)
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private(OWNER_ID)
+    run(handlers.cmd_set(message, command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "16:30"
+    assert message.replies
+
+
+def test_garbage_in_the_variable_leaves_the_gate_working(tmp_path, monkeypatch):
+    """Опечатка в .env не должна ни пускать всех, ни ронять команду."""
+    monkeypatch.setenv("VOLLEY_OWNER_ID", "мой айди")
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    run(handlers.cmd_set(private(ADMIN_ID), command=cmd("close_time 18-00"), store=store, bot=bot))
+    assert settings.value(store, "close_time") == "18:00"
+
+    message = private(MEMBER_ID)
+    run(handlers.cmd_set(message, command=cmd("poll_time 07:00"), store=store, bot=bot))
+    assert settings.value(store, "poll_time") == "09:00"
+
+
+def test_owner_is_ignored_in_a_foreign_group(tmp_path, monkeypatch):
+    """Права владельца не делают чужой чат своим — иначе бот отвечает где попало."""
+    monkeypatch.setenv("VOLLEY_OWNER_ID", str(OWNER_ID))
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = FakeMessage(chat_id=OTHER_CHAT, user_id=OWNER_ID)
+    run(handlers.cmd_set(message, command=cmd("close_time 18-00"), store=store, bot=bot))
+
+    assert settings.value(store, "close_time") == "16:30"
+    assert message.replies == []
+
+
+def test_start_answers_in_private():
+    """Кнопку «Запустить» Telegram показывает первой: молчание на неё читается как поломка."""
+    message = private(MEMBER_ID)
+    run(handlers.cmd_start(message))
+
+    assert message.replies and "/set" in message.replies[0]
+
+
+def test_start_is_silent_in_the_group():
+    message = FakeMessage(user_id=MEMBER_ID)
+    run(handlers.cmd_start(message))
+
+    assert message.replies == [], "в группе /start — чужой шум"
