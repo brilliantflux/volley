@@ -150,7 +150,7 @@ def no_group_yet_text() -> str:
 def settings_text(rows: list[tuple]) -> str:
     """Что можно менять и что стоит сейчас. Ключ показываем: им же и задают."""
     lines = [f"<code>{setting.key}</code> — {setting.title}: {value}" for setting, value in rows]
-    return "Настройки:\n" + "\n".join(lines) + "\n\n" + setting_usage_text()
+    return "Настройки:\n" + "\n".join(lines) + "\n\n" + setting_usage_text() + "\n\n" + skip_usage_text()
 
 
 def setting_usage_text() -> str:

@@ -372,6 +372,15 @@ def test_settings_command_shows_every_current_value(tmp_path):
         assert key in answer, f"{key} не видно в /settings"
 
 
+def test_settings_command_describes_skip(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_settings(message, store=store, bot=bot))
+
+    (answer,) = message.replies
+    assert "/skip" in answer
+
+
 def test_settings_is_not_for_members(tmp_path):
     store, bot = store_with_chat(tmp_path), FakeBot()
     message = FakeMessage(user_id=MEMBER_ID)
