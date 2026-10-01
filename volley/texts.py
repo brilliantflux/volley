@@ -117,7 +117,7 @@ def greeting_text(poll_time: str, close_time: str) -> str:
         "Чтобы это работало, мне нужны права администратора: отправлять опросы "
         "и закреплять сообщения.\n"
         "Команды для админов: /poll — опрос вне расписания, /close — закрыть "
-        "досрочно, /status — сколько плюсов сейчас, /settings — что можно менять."
+        "досрочно, /status — сколько плюсов сейчас, /skip N — не ставить опрос N дней, /settings — что можно менять."
     )
 
 
@@ -128,7 +128,7 @@ def start_text() -> str:
         "объявляю состав.\n\n"
         "Админам группы: /settings — что сейчас настроено, "
         "<code>/set ключ значение</code> — поменять время или вариант ответа, "
-        "/status — сколько плюсов, /poll и /close — опрос вне расписания."
+        "/status — сколько плюсов, /poll и /close — опрос вне расписания, <code>/skip N</code> — пауза в опросах на N дней."
     )
 
 
@@ -176,3 +176,21 @@ def setting_unknown_text(key: str, known: list[str]) -> str:
 
 def setting_rejected_text(reason: str) -> str:
     return f"Не принял: {reason}."
+
+
+# --- пауза опросов ----------------------------------------------------------
+
+
+def skip_usage_text() -> str:
+    return (
+        "Сколько дней не ставить опрос: <code>/skip 3</code>. "
+        "<code>/skip 0</code> снимает паузу."
+    )
+
+
+def skip_saved_text(resume) -> str:
+    return f"Ок. Следующий опрос - {resume:%d.%m}. Вручную можно в любой момент: /poll."
+
+
+def skip_cancelled_text() -> str:
+    return "Пауза снята, опросы идут по расписанию."

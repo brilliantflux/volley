@@ -261,6 +261,12 @@ run "/start отвечает в группе" \
     "$ROOT/volley/handlers.py" "if message.chat.type != PRIVATE:" "if False:" \
     "$ROOT" "${PYTEST[@]}" tests/test_handlers.py
 
+# 36. Пауза опросов: тик не должен создавать опрос до дня возобновления.
+run "пауза опросов не действует" \
+    --expect "test_skip_blocks_the_poll_until_the_resume_day" \
+    "$ROOT/volley/schedule.py" "if skip_until is not None and now.date() < skip_until:" "if False:" \
+    "$ROOT" "${PYTEST[@]}" tests/test_tick.py
+
 echo
 if [ "$FAILED" -eq 0 ]; then
     echo "мутации пойманы ✅ (испытаний в прогоне: ${ONLY:-все $NUMBER})"

@@ -450,3 +450,75 @@ def test_start_is_silent_in_the_group():
     run(handlers.cmd_start(message))
 
     assert message.replies == [], "в группе /start — чужой шум"
+
+
+# --- /skip: админ откладывает опросы ---------------------------------------
+
+
+def fixed_now(monkeypatch, hour=8):
+    from datetime import datetime
+
+    monkeypatch.setattr(handlers, "_now", lambda: datetime(2026, 8, 21, hour, 0))
+
+
+def test_admin_skips_days_and_gets_the_resume_date(tmp_path, monkeypatch):
+    fixed_now(monkeypatch)
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_skip(message, command=cmd("3"), store=store, bot=bot))
+
+    assert store.setting("skip_until") == "2026-08-24"
+    assert "24.08" in message.replies[0]
+
+
+def test_skip_after_todays_poll_window_starts_tomorrow(tmp_path, monkeypatch):
+    fixed_now(monkeypatch, hour=17)
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    run(handlers.cmd_skip(private(), command=cmd("1"), store=store, bot=bot))
+    assert store.setting("skip_until") == "2026-08-23"
+
+
+def test_skip_zero_cancels(tmp_path, monkeypatch):
+    fixed_now(monkeypatch)
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    store.set_setting("skip_until", "2026-08-30")
+    message = private()
+    run(handlers.cmd_skip(message, command=cmd("0"), store=store, bot=bot))
+
+    assert store.setting("skip_until") in (None, "")
+    assert message.replies
+
+
+def test_skip_bad_arguments_reply_usage_and_change_nothing(tmp_path, monkeypatch):
+    fixed_now(monkeypatch)
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    store.set_setting("skip_until", "2026-08-30")
+    for args in (None, "", "abc", "-2", "1.5"):
+        message = private()
+        run(handlers.cmd_skip(message, command=cmd(args), store=store, bot=bot))
+        assert "/skip" in message.replies[0]
+    assert store.setting("skip_until") == "2026-08-30"
+
+
+def test_member_cannot_skip(tmp_path, monkeypatch):
+    fixed_now(monkeypatch)
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private(MEMBER_ID)
+    run(handlers.cmd_skip(message, command=cmd("3"), store=store, bot=bot))
+
+    assert store.setting("skip_until") is None
+    assert message.replies and "админ" in message.replies[0].lower()
+
+
+def test_skip_is_not_editable_through_set(tmp_path):
+    store, bot = store_with_chat(tmp_path), FakeBot()
+    message = private()
+    run(handlers.cmd_set(message, command=cmd("skip_until 2030-01-01"), store=store, bot=bot))
+    assert store.setting("skip_until") is None
+
+
+def test_manual_poll_ignores_skip(tmp_path):
+    store, bot, service = store_with_chat(tmp_path), FakeBot(), FakeService()
+    store.set_setting("skip_until", "2999-01-01")
+    run(handlers.cmd_poll(private(), service=service, store=store, bot=bot))
+    assert [c[0] for c in service.calls] == ["open_poll"]

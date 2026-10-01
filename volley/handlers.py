@@ -8,7 +8,7 @@ from datetime import datetime
 from aiogram import F, Router
 from aiogram.filters import Command
 
-from . import config, settings, texts
+from . import config, schedule, settings, texts
 from .domain import Voter
 from .store import Store
 
@@ -17,6 +17,10 @@ log = logging.getLogger(__name__)
 GROUP_TYPES = ("group", "supergroup")
 PRIVATE = "private"
 JOINED_STATUSES = ("member", "administrator", "creator")
+
+
+def _now() -> datetime:
+    return datetime.now(config.TZ)
 
 
 async def on_my_chat_member(event, store: Store, bot) -> None:
@@ -147,6 +151,28 @@ async def cmd_status(message, service, store: Store, bot) -> None:
     await message.reply(await service.status_text())
 
 
+async def cmd_skip(message, command, store: Store, bot) -> None:
+    """Пауза авто-опросов на N дней; 0 снимает. Ручной /poll паузу не замечает."""
+    if not await _allowed(message, store, bot):
+        return
+    raw = (command.args or "").strip()
+    if not raw.isascii() or not raw.isdigit():
+        await message.reply(texts.skip_usage_text())
+        return
+    days = int(raw)
+    if days == 0:
+        store.set_setting(schedule.SKIP_KEY, "")
+        await message.reply(texts.skip_cancelled_text())
+        return
+    now = _now()
+    today_poll = store.poll_for_day(now.date().isoformat())
+    close_time = settings.time_value(store, "close_time")
+    resume = schedule.skip_resume_day(now, today_poll, close_time, days)
+    store.set_setting(schedule.SKIP_KEY, resume.isoformat())
+    log.info("админ %s отложил опросы до %s", message.from_user.id, resume)
+    await message.reply(texts.skip_saved_text(resume))
+
+
 async def cmd_settings(message, store: Store, bot) -> None:
     if not await _allowed(message, store, bot):
         return
@@ -181,6 +207,7 @@ def build_router() -> Router:
     router.message.register(cmd_poll, Command("poll"))
     router.message.register(cmd_close, Command("close"))
     router.message.register(cmd_status, Command("status"))
+    router.message.register(cmd_skip, Command("skip"))
     router.message.register(cmd_settings, Command("settings"))
     router.message.register(cmd_set, Command("set"))
     return router

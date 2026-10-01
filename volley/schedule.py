@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, time
+from datetime import date, datetime, time, timedelta
 
 from . import config, settings
 from .domain import Poll
@@ -21,8 +21,31 @@ log = logging.getLogger(__name__)
 TICK_SECONDS = 60  # мельче не имеет смысла: настройки задаются с точностью до минуты
 
 
+SKIP_KEY = "skip_until"  # не в settings.SETTINGS: через /set его менять нельзя
+
+
+def skip_until(store) -> date | None:
+    """Первый день, когда авто-опрос снова разрешён. Пусто и мусор — без паузы."""
+    try:
+        return date.fromisoformat(store.setting(SKIP_KEY) or "")
+    except ValueError:
+        return None
+
+
+def skip_resume_day(now: datetime, today_poll: Poll | None, close_time: time, days: int) -> date:
+    """Окно паузы начинается сегодня, если сегодняшний опрос ещё может появиться."""
+    start = now.date()
+    if today_poll is not None or now.time() >= close_time:
+        start += timedelta(days=1)
+    return start + timedelta(days=days)
+
+
 def should_create_poll(
-    now: datetime, today_poll: Poll | None, poll_time: time, close_time: time
+    now: datetime,
+    today_poll: Poll | None,
+    poll_time: time,
+    close_time: time,
+    skip_until: date | None = None,
 ) -> bool:
     """Опрос на сегодня нужен, если его ещё нет и день не прошёл.
 
@@ -32,6 +55,8 @@ def should_create_poll(
     закрытия не оставляла рядом устаревшее число.
     """
     if today_poll is not None:
+        return False
+    if skip_until is not None and now.date() < skip_until:
         return False
     return poll_time <= now.time() < close_time
 
@@ -69,7 +94,7 @@ async def tick(service, store, now: datetime) -> None:
         await service.remind_later(poll)
 
     poll_time = settings.time_value(store, "poll_time")
-    if should_create_poll(now, poll, poll_time, close_time):
+    if should_create_poll(now, poll, poll_time, close_time, skip_until(store)):
         await service.open_poll(now.date())
 
 
